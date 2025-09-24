@@ -1,0 +1,109 @@
+1️⃣ Preparación del entorno
+a) Instalar Python
+
+Asegúrate de tener Python 3.10+ instalado en tu PC.
+
+Puedes descargarlo desde python.org
+.
+
+Para verificar, abre CMD o Terminal y escribe:
+
+python --version
+
+
+Deberías ver algo como: Python 3.11.4.
+
+b) Instalar librerías necesarias
+
+El programa usa ttkbootstrap para la interfaz. Para instalarla, abre CMD o Terminal y ejecuta:
+
+pip install ttkbootstrap
+
+
+Esto instalará automáticamente Tkinter mejorado y estilos modernos.
+
+Opcionalmente, para manejar CSV y JSON, ya vienen integradas con Python, así que no necesitas instalar nada más.
+
+2️⃣ Guardar el código
+
+Copia todo el código de organizador_gastos.py en un archivo nuevo con el mismo nombre:
+
+organizador_gastos.py
+
+
+Guarda el archivo en una carpeta dedicada, por ejemplo:
+
+C:\Proyectos\OrganizadorGastos
+
+3️⃣ Ejecutar la aplicación
+
+Abre CMD/Terminal y navega a la carpeta donde está el archivo:
+
+cd C:\Proyectos\OrganizadorGastos
+
+
+Ejecuta el programa:
+
+python organizador_gastos.py
+
+
+Se abrirá la ventana “Organizador de Gastos Piola”.
+
+4️⃣ Cómo usar la aplicación
+a) Agregar un gasto
+
+En el panel izquierdo, ingresa:
+
+Categoría (ej: comida, transporte, ocio).
+
+Monto en soles (ej: 25.50).
+
+Descripción (opcional).
+
+Presiona el botón:
+
+➕ Agregar Gasto
+
+
+✅ El gasto aparecerá en la tabla de la derecha y el total se actualizará automáticamente.
+
+b) Editar un gasto
+
+Selecciona un gasto en la tabla y:
+
+Haz doble clic o presiona:
+
+✏️ Editar seleccionado
+
+
+Modifica los campos en la ventana que aparece y haz clic en Guardar.
+
+c) Eliminar un gasto
+
+Selecciona uno o varios gastos en la tabla.
+
+Presiona:
+
+🗑️ Eliminar seleccionado
+
+
+Confirma en el cuadro de diálogo.
+
+d) Exportar gastos a CSV
+
+Presiona el botón:
+
+📤 Exportar CSV
+
+
+Esto generará un archivo gastos_export.csv que se puede abrir en Excel o Google Sheets.
+
+e) Guardar cambios
+
+Para asegurarte de que todo quede guardado en gastos.json, presiona:
+
+💾 Guardar
+
+f) Salir de la aplicación
+
+Presiona el botón Salir o cierra la ventana normalmente.

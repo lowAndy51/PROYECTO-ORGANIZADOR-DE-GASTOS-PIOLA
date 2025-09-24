@@ -1,0 +1,411 @@
+# organizador_gastos.py
+# Requiere: pip install ttkbootstrap
+import json
+import os
+import csv
+import uuid
+import tempfile
+from pathlib import Path
+from datetime import datetime
+import ttkbootstrap as tb
+from ttkbootstrap.constants import *
+from tkinter import messagebox as mb
+
+ARCHIVO = Path("gastos.json")
+
+gastos = []
+
+entry_categoria = None
+entry_monto = None
+entry_descripcion = None
+lbl_estado = None
+tree_gastos = None
+lbl_total = None
+
+# -------------------- AJUSTE FINAL (si lo quieres cambiar, modifica MONTO_OFFSET_BASE) --------------------
+MONTO_OFFSET_BASE = 110   # valor final aplicado: desplaza Monto a la derecha (px)
+ADAPTIVE_DIVISOR = 28     # adaptividad: cada ADAPTIVE_DIVISOR px de ancho extra añade +1px al offset
+# ----------------------------------------------------------------------------------------------------------
+
+def _parse_monto(value):
+    if value is None:
+        raise ValueError("monto None")
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(" ", "")
+    if s.count(".") > 1 and "," not in s:
+        s = s.replace(".", "")
+    s = s.replace(",", ".")
+    return float(s)
+
+def _parse_fecha(value):
+    if not value:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    s = str(value).strip()
+    if s.isdigit():
+        try:
+            n = int(s)
+            if n > 9999:
+                return datetime.fromtimestamp(n).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+    formatos = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%Y")
+    for f in formatos:
+        try:
+            dt = datetime.strptime(s, f)
+            if f == "%Y":
+                dt = dt.replace(month=1, day=1)
+            if f == "%Y-%m-%d":
+                dt = datetime(dt.year, dt.month, dt.day, 0, 0, 0)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+    return s
+
+def guardar_en_archivo():
+    global gastos
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".tmp", prefix="gastos_")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(gastos, f, indent=2, ensure_ascii=False)
+        Path(tmp_path).replace(ARCHIVO)
+        if lbl_estado:
+            lbl_estado.config(text="✅ Cambios guardados.", foreground="green")
+    except Exception as e:
+        if lbl_estado:
+            lbl_estado.config(text=f"Error al guardar: {e}", foreground="red")
+        else:
+            print("Error al guardar:", e)
+
+def cargar_de_archivo():
+    global gastos
+    try:
+        if not ARCHIVO.exists():
+            gastos = []
+            return
+        with open(ARCHIVO, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        lista = []
+        if isinstance(data, list):
+            for it in data:
+                try:
+                    monto = _parse_monto(it.get("monto", 0))
+                except Exception:
+                    monto = 0.0
+                fecha = _parse_fecha(it.get("fecha"))
+                iid = it.get("id") or str(uuid.uuid4())
+                lista.append({
+                    "id": str(iid),
+                    "categoria": (it.get("categoria") or "").strip().lower(),
+                    "monto": monto,
+                    "descripcion": it.get("descripcion") or "",
+                    "fecha": fecha
+                })
+            gastos = lista
+        elif isinstance(data, dict):
+            for categoria, items in data.items():
+                if isinstance(items, list):
+                    for it in items:
+                        try:
+                            monto = _parse_monto(it.get("monto", 0))
+                        except Exception:
+                            monto = 0.0
+                        fecha = _parse_fecha(it.get("fecha"))
+                        lista.append({
+                            "id": str(uuid.uuid4()),
+                            "categoria": str(categoria).strip().lower(),
+                            "monto": monto,
+                            "descripcion": it.get("descripcion") or "",
+                            "fecha": fecha
+                        })
+            gastos = lista
+        else:
+            gastos = []
+    except Exception:
+        gastos = []
+
+def actualizar_treeview():
+    global tree_gastos, lbl_total, gastos
+    for r in tree_gastos.get_children():
+        tree_gastos.delete(r)
+
+    def key_fn(x):
+        f = x.get("fecha", "")
+        try:
+            if isinstance(f, str):
+                try:
+                    dt = datetime.strptime(f, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    try:
+                        dt = datetime.strptime(f, "%Y")
+                    except Exception:
+                        dt = None
+                if dt:
+                    return dt.timestamp()
+        except Exception:
+            pass
+        return 0
+
+    sorted_g = sorted(gastos, key=key_fn, reverse=True)
+
+    total = 0.0
+    for item in sorted_g:
+        iid = item["id"]
+        cat = (item.get("categoria") or "").capitalize()
+        monto = float(item.get("monto", 0))
+        desc = item.get("descripcion", "")
+        fecha = item.get("fecha", "")
+        total += monto
+        tree_gastos.insert("", "end", iid=iid, values=(cat, f"S/ {monto:.2f}", desc, fecha))
+    lbl_total.config(text=f"Total gastado: S/ {total:.2f}")
+
+def _limpiar_campos():
+    entry_categoria.delete(0, "end")
+    entry_monto.delete(0, "end")
+    entry_descripcion.delete(0, "end")
+
+def agregar_gasto():
+    global gastos
+    categoria = entry_categoria.get().strip().lower()
+    monto_texto = entry_monto.get().strip()
+    descripcion = entry_descripcion.get().strip()
+
+    if not categoria:
+        lbl_estado.config(text="❌ La categoría no puede estar vacía.", foreground="red")
+        return
+    if not monto_texto:
+        lbl_estado.config(text="❌ El monto no puede estar vacío.", foreground="red")
+        return
+    try:
+        monto = _parse_monto(monto_texto)
+    except Exception:
+        lbl_estado.config(text="❌ Monto inválido. Usa 25.5 o 25,5.", foreground="red")
+        return
+    if monto < 0:
+        lbl_estado.config(text="❌ El monto no puede ser negativo.", foreground="red")
+        return
+
+    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nuevo = {
+        "id": str(uuid.uuid4()),
+        "categoria": categoria,
+        "monto": monto,
+        "descripcion": descripcion,
+        "fecha": fecha
+    }
+    gastos.append(nuevo)
+    guardar_en_archivo()
+    lbl_estado.config(text="✅ Gasto agregado.", foreground="green")
+    _limpiar_campos()
+    actualizar_treeview()
+
+def on_tree_select(event=None):
+    sel = tree_gastos.selection()
+    if not sel:
+        return
+    iid = sel[0]
+    g = next((x for x in gastos if x["id"] == iid), None)
+    if not g:
+        return
+    entry_categoria.delete(0, "end"); entry_categoria.insert(0, g.get("categoria", ""))
+    entry_monto.delete(0, "end"); entry_monto.insert(0, f"{g.get('monto', 0):.2f}")
+    entry_descripcion.delete(0, "end"); entry_descripcion.insert(0, g.get("descripcion", ""))
+
+def eliminar_gasto_seleccionado(event=None):
+    sel = tree_gastos.selection()
+    if not sel:
+        lbl_estado.config(text="❌ Selecciona un gasto para eliminar.", foreground="red")
+        return
+    if not mb.askyesno("Confirmar eliminación", f"¿Eliminar {len(sel)} gasto(s)?"):
+        return
+    global gastos
+    gastos = [g for g in gastos if g["id"] not in sel]
+    guardar_en_archivo()
+    lbl_estado.config(text="🗑️ Eliminado.", foreground="green")
+    actualizar_treeview()
+    _limpiar_campos()
+
+def editar_gasto_seleccionado(event=None):
+    sel = tree_gastos.selection()
+    if not sel:
+        lbl_estado.config(text="❌ Selecciona un gasto para editar (doble-clic).", foreground="red")
+        return
+    iid = sel[0]
+    g = next((x for x in gastos if x["id"] == iid), None)
+    if g is None:
+        lbl_estado.config(text="❌ Gasto no encontrado.", foreground="red")
+        return
+
+    dlg = tb.Toplevel(); dlg.title("Editar gasto"); dlg.geometry("420x220"); dlg.resizable(False, False)
+    tb.Label(dlg, text="Categoría").pack(anchor="w", padx=12, pady=(12, 0))
+    e_cat = tb.Entry(dlg); e_cat.pack(fill="x", padx=12, pady=4); e_cat.insert(0, g.get("categoria", ""))
+    tb.Label(dlg, text="Monto").pack(anchor="w", padx=12, pady=(6, 0))
+    e_mon = tb.Entry(dlg); e_mon.pack(fill="x", padx=12, pady=4); e_mon.insert(0, f"{g.get('monto',0):.2f}")
+    tb.Label(dlg, text="Descripción").pack(anchor="w", padx=12, pady=(6, 0))
+    e_desc = tb.Entry(dlg); e_desc.pack(fill="x", padx=12, pady=4); e_desc.insert(0, g.get("descripcion",""))
+
+    def guardar_edicion():
+        nc = e_cat.get().strip().lower()
+        nm_text = e_mon.get().strip()
+        nd = e_desc.get().strip()
+        if not nc:
+            mb.showerror("Error", "La categoría no puede estar vacía."); return
+        try:
+            nm = _parse_monto(nm_text)
+        except Exception:
+            mb.showerror("Error", "Monto inválido."); return
+        g["categoria"] = nc; g["monto"] = nm; g["descripcion"] = nd
+        guardar_en_archivo(); actualizar_treeview()
+        lbl_estado.config(text="✏️ Gasto editado.", foreground="green"); dlg.destroy()
+
+    tb.Button(dlg, text="Guardar", bootstyle="success", command=guardar_edicion).pack(side="right", padx=12, pady=12)
+    tb.Button(dlg, text="Cancelar", bootstyle="secondary", command=dlg.destroy).pack(side="right", padx=(0,6), pady=12)
+
+def _on_double_click(event):
+    item = tree_gastos.identify_row(event.y)
+    if item:
+        tree_gastos.selection_set(item); editar_gasto_seleccionado()
+
+def exportar_csv():
+    try:
+        fname = Path("gastos_export.csv")
+        with open(fname, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["id", "categoria", "monto", "descripcion", "fecha"])
+            for g in gastos:
+                writer.writerow([g["id"], g["categoria"], f"{g['monto']:.2f}", g["descripcion"], g["fecha"]])
+        mb.showinfo("Exportar CSV", f"Exportado a:\n{fname.resolve()}")
+    except Exception as e:
+        mb.showerror("Error", f"Error al exportar CSV: {e}")
+
+def crear_interface():
+    global entry_categoria, entry_monto, entry_descripcion, lbl_estado, tree_gastos, lbl_total
+
+    cargar_de_archivo()
+
+    app = tb.Window(title="Organizador de Gastos Piola", themename="darkly")
+    app.geometry("1366x760"); app.minsize(900, 560)
+    app.columnconfigure(0, weight=0, minsize=360); app.columnconfigure(1, weight=1)
+
+    header = tb.Frame(app, padding=10); header.grid(row=0, column=0, columnspan=2, sticky="nsew")
+    tb.Label(header, text="🧾 Organizador de Gastos", font=("Helvetica", 20, "bold")).pack(anchor="w")
+
+    left = tb.Frame(app, padding=12, bootstyle="secondary"); left.grid(row=1, column=0, sticky="nsew")
+    left.columnconfigure(0, weight=1)
+    tb.Label(left, text="Categoría (ej: Comida)", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w")
+    entry_categoria = tb.Entry(left); entry_categoria.grid(row=1, column=0, sticky="ew", pady=(4,8))
+    tb.Label(left, text="Monto en soles (ej: 25.50)", font=("Helvetica", 10, "bold")).grid(row=2, column=0, sticky="w")
+    entry_monto = tb.Entry(left); entry_monto.grid(row=3, column=0, sticky="ew", pady=(4,8))
+    tb.Label(left, text="Descripción (opcional)", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w")
+    entry_descripcion = tb.Entry(left); entry_descripcion.grid(row=5, column=0, sticky="ew", pady=(4,12))
+    tb.Button(left, text="  ➕  Agregar Gasto", bootstyle="success-outline", command=agregar_gasto).grid(row=6, column=0, sticky="ew", pady=(0,8))
+    tb.Button(left, text="✏️ Editar seleccionado", bootstyle="warning-outline", command=editar_gasto_seleccionado).grid(row=7, column=0, sticky="ew", pady=(0,8))
+    tb.Button(left, text="🗑️ Eliminar seleccionado", bootstyle="danger-outline", command=eliminar_gasto_seleccionado).grid(row=8, column=0, sticky="ew")
+    lbl_estado = tb.Label(left, text="", font=("Helvetica", 10)); lbl_estado.grid(row=9, column=0, sticky="w", pady=(10,0))
+
+    right = tb.Frame(app, padding=12); right.grid(row=1, column=1, sticky="nsew")
+    right.rowconfigure(0, weight=1); right.columnconfigure(0, weight=1)
+    tb.Label(right, text="📊 Resumen de Gastos", font=("Helvetica", 14, "bold")).grid(row=0, column=0, sticky="w")
+
+    tv_frame = tb.Frame(right); tv_frame.grid(row=1, column=0, sticky="nsew", pady=(8,8))
+    tv_frame.rowconfigure(0, weight=1); tv_frame.columnconfigure(0, weight=1)
+
+    columns = ("categoria", "monto", "descripcion", "fecha")
+    tree_gastos = tb.Treeview(tv_frame, columns=columns, show="headings", height=15)
+
+    # headings: categoria derecha, monto derecha, descripcion center, fecha izquierda
+    tree_gastos.heading("categoria", text="Categoría", anchor="e")
+    tree_gastos.heading("monto", text="Monto", anchor="e")
+    tree_gastos.heading("descripcion", text="Descripción", anchor="center")
+    tree_gastos.heading("fecha", text="Fecha", anchor="w")
+
+    MINWIDTHS = [160, 120, 260, 160]
+    RATIOS = [0.165, 0.145, 0.53, 0.165]
+
+    tree_gastos.column("categoria", width=170, minwidth=MINWIDTHS[0], anchor="e", stretch=False)
+    tree_gastos.column("monto", width=140, minwidth=MINWIDTHS[1], anchor="e", stretch=False)
+    tree_gastos.column("descripcion", width=520, minwidth=MINWIDTHS[2], anchor="center", stretch=False)
+    tree_gastos.column("fecha", width=170, minwidth=MINWIDTHS[3], anchor="w", stretch=False)
+
+    tree_gastos.grid(row=0, column=0, sticky="nsew")
+
+    def ajustar_columnas_por_ratio(event=None):
+        try:
+            total_w = tv_frame.winfo_width()
+            if total_w <= 10:
+                return
+            espacio_util = max(300, total_w - 24)
+            nuevos = [max(MINWIDTHS[i], int(espacio_util * RATIOS[i])) for i in range(4)]
+
+            extra_pixels = max(0, espacio_util - 1200)
+            adaptive_add = int(extra_pixels / ADAPTIVE_DIVISOR)
+            offset = MONTO_OFFSET_BASE + adaptive_add
+
+            if nuevos[2] - offset >= MINWIDTHS[2]:
+                nuevos[1] += offset
+                nuevos[2] -= offset
+            else:
+                posible = max(0, nuevos[2] - MINWIDTHS[2])
+                nuevos[1] += posible
+                nuevos[2] -= posible
+
+            suma = sum(nuevos)
+            if suma > espacio_util:
+                exceso = suma - espacio_util
+                reducir = min(exceso, nuevos[2] - MINWIDTHS[2])
+                nuevos[2] -= reducir
+
+            cols = ["categoria", "monto", "descripcion", "fecha"]
+            for col, w in zip(cols, nuevos):
+                tree_gastos.column(col, width=w)
+        except Exception:
+            pass
+
+    tv_frame.bind("<Configure>", ajustar_columnas_por_ratio)
+    app.bind("<Configure>", ajustar_columnas_por_ratio)
+    app.after(150, ajustar_columnas_por_ratio)
+
+    vscroll = tb.Scrollbar(tv_frame, orient="vertical", command=tree_gastos.yview)
+    hscroll = tb.Scrollbar(tv_frame, orient="horizontal", command=tree_gastos.xview)
+    tree_gastos.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
+    vscroll.grid(row=0, column=1, sticky="ns")
+    hscroll.grid(row=1, column=0, sticky="ew")
+
+    lbl_total = tb.Label(right, text="Total gastado: S/ 0.00", font=("Helvetica", 12, "bold"))
+    lbl_total.grid(row=2, column=0, sticky="e")
+
+    footer = tb.Frame(app, padding=8); footer.grid(row=2, column=0, columnspan=2, sticky="ew")
+    footer.columnconfigure(0, weight=1)
+    tb.Button(footer, text="📤 Exportar CSV", bootstyle="info-outline", command=exportar_csv).grid(row=0, column=0, sticky="w")
+    tb.Button(footer, text="💾 Guardar", bootstyle="secondary", command=guardar_en_archivo).grid(row=0, column=1, sticky="e", padx=6)
+    tb.Button(footer, text="Salir", bootstyle="outline", command=app.destroy).grid(row=0, column=2, sticky="e")
+
+    tree_gastos.bind("<<TreeviewSelect>>", on_tree_select)
+    tree_gastos.bind("<Double-1>", _on_double_click)
+
+    menu = tb.Menu(app, tearoff=0)
+    menu.add_command(label="Editar", command=editar_gasto_seleccionado)
+    menu.add_command(label="Eliminar", command=eliminar_gasto_seleccionado)
+
+    def _on_right_click(event):
+        iid = tree_gastos.identify_row(event.y)
+        if iid:
+            tree_gastos.selection_set(iid)
+            menu.post(event.x_root, event.y_root)
+
+    tree_gastos.bind("<Button-3>", _on_right_click)
+
+    actualizar_treeview()
+    return app
+
+if __name__ == "__main__":
+    try:
+        app = crear_interface()
+        app.mainloop()
+    except Exception as e:
+        import traceback
+        print("Ocurrió un error al iniciar la interfaz:", e)
+        traceback.print_exc()
+        input("Presiona ENTER para salir...")
